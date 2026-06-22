@@ -39,6 +39,10 @@ class SoundEngine @Inject constructor(
         player?.playbackParameters = PlaybackParameters(pitch)
     }
 
+    fun setVolume(volume: Float) {
+        player?.volume = volume
+    }
+
     fun release() {
         player?.release()
         player = null

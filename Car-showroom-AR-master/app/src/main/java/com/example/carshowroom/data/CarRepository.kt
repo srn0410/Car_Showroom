@@ -31,7 +31,9 @@ class CarRepository @Inject constructor() {
     )
 
     fun getWheelStyles() = listOf(
-        WheelStyle("standard", "Standard", "models/4.glb"),
-        WheelStyle("sport", "Sport", "models/5.glb")
+        WheelStyle("silver", "Silver", Color(0xFFE0E0E0)),
+        WheelStyle("black", "Matte Black", Color(0xFF111111)),
+        WheelStyle("gold", "Gold", Color(0xFFFFD700)),
+        WheelStyle("bronze", "Bronze", Color(0xFFCD7F32))
     )
 }

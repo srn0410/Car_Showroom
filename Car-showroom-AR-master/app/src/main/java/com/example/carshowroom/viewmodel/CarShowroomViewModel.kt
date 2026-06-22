@@ -17,6 +17,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 
+enum class InteractionMode {
+    TRANSLATE,
+    ZOOM,
+    ROTATE,
+    LOCKED
+}
+
 data class CarShowroomUiState(
     val cars: List<CarModel> = emptyList(),
     val colors: List<CarColor> = emptyList(),
@@ -25,6 +32,8 @@ data class CarShowroomUiState(
     val selectedColor: CarColor? = null,
     val selectedWheel: WheelStyle? = null,
     val isRevving: Boolean = false,
+    val isMuted: Boolean = false,
+    val interactionMode: InteractionMode = InteractionMode.TRANSLATE,
 )
 
 @HiltViewModel
@@ -38,6 +47,7 @@ class CarShowroomViewModel @Inject constructor(
 
     private var revJob: Job? = null
     private var currentPitch = 1.0f
+    private var wasPlayingBeforePause = true
 
     init {
         handleIntent(CarShowroomIntent.Initialize)
@@ -72,6 +82,20 @@ class CarShowroomViewModel @Inject constructor(
             is CarShowroomIntent.SetRevving -> {
                 _uiState.value = _uiState.value.copy(isRevving = intent.isRevving)
                 handleRevving(intent.isRevving)
+            }
+            is CarShowroomIntent.ToggleMute -> {
+                val newMutedState = !_uiState.value.isMuted
+                _uiState.value = _uiState.value.copy(isMuted = newMutedState)
+                soundEngine.setVolume(if (newMutedState) 0f else 1f)
+            }
+            is CarShowroomIntent.SetInteractionMode -> {
+                _uiState.value = _uiState.value.copy(interactionMode = intent.mode)
+            }
+            is CarShowroomIntent.PauseAudio -> {
+                soundEngine.pause()
+            }
+            is CarShowroomIntent.ResumeAudio -> {
+                soundEngine.start()
             }
         }
     }

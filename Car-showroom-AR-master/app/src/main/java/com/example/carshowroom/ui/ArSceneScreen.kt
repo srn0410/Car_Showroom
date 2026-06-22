@@ -3,19 +3,37 @@ package com.example.carshowroom.ui
 import android.view.MotionEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ColorLens
+import androidx.compose.material.icons.filled.DonutLarge
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.carshowroom.ui.components.*
+import com.example.carshowroom.ui.components.CarSelectorSheet
+import com.example.carshowroom.ui.components.ColorPickerSheet
+import com.example.carshowroom.ui.components.WheelPickerSheet
+import com.example.carshowroom.ui.components.AnimatedBottomNavigationBar
+import com.example.carshowroom.ui.components.BottomNavOption
+import com.example.carshowroom.ui.components.oneUiEffect
+import com.example.carshowroom.utils.ImageUtils
 import com.example.carshowroom.viewmodel.CarShowroomIntent
 import com.example.carshowroom.viewmodel.CarShowroomViewModel
+import com.example.carshowroom.viewmodel.InteractionMode
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.node.ModelNode
@@ -26,11 +44,13 @@ import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 import com.google.ar.core.Plane
 import com.google.ar.core.TrackingState
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArSceneScreen(
-    viewModel: CarShowroomViewModel = hiltViewModel(),
+    viewModel: CarShowroomViewModel,
+    onNavigateBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     
@@ -47,6 +67,19 @@ fun ArSceneScreen(
     var currentAnchorNode by remember { mutableStateOf<AnchorNode?>(null) }
     var currentModelNode by remember { mutableStateOf<ModelNode?>(null) }
     var lastTapEvent by remember { mutableStateOf<MotionEvent?>(null) }
+    var currentZoomLevel by remember { mutableFloatStateOf(1.0f) }
+
+    var isCapturing by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    LaunchedEffect(isCapturing) {
+        if (isCapturing) {
+            // Give Compose time to re-render without the UI (2 frames)
+            delay(100)
+            ImageUtils.captureArSnapshot(context, (context as android.app.Activity).window)
+            // Restore UI
+            isCapturing = false
+        }
+    }
 
     // Handle Model Loading/Switching
     LaunchedEffect(uiState.selectedCar) {
@@ -60,6 +93,7 @@ fun ArSceneScreen(
                     )
 
                     currentModelNode = newModelNode
+                    currentZoomLevel = 1.0f // Reset zoom when car changes!
                     
                     // If we already have an anchor, update its child
                     currentAnchorNode?.let { anchorNode ->
@@ -71,25 +105,69 @@ fun ArSceneScreen(
         }
     }
 
-    // Handle Color Change
-    LaunchedEffect(uiState.selectedColor, currentModelNode) {
-        uiState.selectedColor?.let { carColor ->
-            currentModelNode?.let { modelNode ->
-                val car = uiState.selectedCar
-                val paintMaterials = car?.paintMaterialNames ?: emptyList()
-                modelNode.modelInstance.materialInstances.forEach { material ->
-                    val materialName = material.name ?: ""
-                    val isPaint = paintMaterials.isEmpty() || paintMaterials.any { 
-                        materialName.contains(it, ignoreCase = true) || it.contains(materialName, ignoreCase = true)
-                    }
-                    if (isPaint) {
+    // Handle Color Change for Paint and Rims
+    LaunchedEffect(uiState.selectedColor, uiState.selectedWheel, currentModelNode) {
+        currentModelNode?.let { modelNode ->
+            val car = uiState.selectedCar
+            val paintMaterials = car?.paintMaterialNames ?: emptyList()
+            val rimMaterials = car?.rimMaterialNames ?: emptyList()
+            
+            modelNode.modelInstance.materialInstances.forEach { material ->
+                val materialName = material.name ?: ""
+                val isPaint = paintMaterials.isNotEmpty() && paintMaterials.any { 
+                    materialName.contains(it, ignoreCase = true) || it.contains(materialName, ignoreCase = true)
+                }
+                val isRim = rimMaterials.isNotEmpty() && rimMaterials.any {
+                    materialName.contains(it, ignoreCase = true) || it.contains(materialName, ignoreCase = true)
+                }
+
+                if (isPaint) {
+                    uiState.selectedColor?.let { carColor ->
                         val c = carColor.color
-                        material.setParameter("baseColorFactor", c.red, c.green, c.blue, c.alpha)
-                        // Add some emissive so the color is visible even if the AR lighting/environment is completely dark
-                        material.setParameter("emissiveFactor", c.red * 0.4f, c.green * 0.4f, c.blue * 0.4f)
+                        if (car?.modelPath?.contains("4.glb") == true) {
+                            // "Old" implementation for 4.glb to overpower its baked-in red texture using emissive glow
+                            material.setParameter("baseColorFactor", c.red, c.green, c.blue, c.alpha)
+                            material.setParameter("emissiveFactor", c.red * 0.4f, c.green * 0.4f, c.blue * 0.4f)
+                        } else {
+                            // "New" mathematically correct implementation for properly textured cars
+                            val r = Math.pow(c.red.toDouble(), 2.2).toFloat()
+                            val g = Math.pow(c.green.toDouble(), 2.2).toFloat()
+                            val b = Math.pow(c.blue.toDouble(), 2.2).toFloat()
+                            material.setParameter("baseColorFactor", r, g, b, c.alpha)
+                            material.setParameter("emissiveFactor", 0f, 0f, 0f)
+                        }
+                    }
+                } else if (isRim) {
+                    uiState.selectedWheel?.let { wheelStyle ->
+                        val c = wheelStyle.color
+                        // Rims are generally metallic, convert to linear space
+                        val r = Math.pow(c.red.toDouble(), 2.2).toFloat()
+                        val g = Math.pow(c.green.toDouble(), 2.2).toFloat()
+                        val b = Math.pow(c.blue.toDouble(), 2.2).toFloat()
+                        material.setParameter("baseColorFactor", r, g, b, c.alpha)
                     }
                 }
             }
+        }
+    }
+
+    // Handle Interaction Modes
+    LaunchedEffect(uiState.interactionMode, currentModelNode, currentAnchorNode) {
+        val isTranslateMode = uiState.interactionMode == InteractionMode.TRANSLATE
+        val isRotateMode = uiState.interactionMode == InteractionMode.ROTATE
+        
+        // 1. Lock/Unlock the AnchorNode from sliding across the floor
+        currentAnchorNode?.isEditable = isTranslateMode
+        currentAnchorNode?.isPositionEditable = isTranslateMode
+        currentAnchorNode?.isRotationEditable = false
+        currentAnchorNode?.isScaleEditable = false
+        
+        // 2. Configure the ModelNode (the car itself)
+        currentModelNode?.let { node ->
+            node.isEditable = isRotateMode || isTranslateMode
+            node.isPositionEditable = false // The anchor handles position natively
+            node.isRotationEditable = isRotateMode // Native two-finger twist
+            node.isScaleEditable = false // We handle scaling manually for sensitivity and bounds
         }
     }
 
@@ -101,14 +179,38 @@ fun ArSceneScreen(
             materialLoader = materialLoader,
             environment = environment,
             childNodes = childNodes,
-            planeRenderer = true,
+            planeRenderer = !isCapturing,
             sessionConfiguration = { session, config ->
                 config.lightEstimationMode = com.google.ar.core.Config.LightEstimationMode.AMBIENT_INTENSITY
             },
             onGestureListener = rememberOnGestureListener(
                 onSingleTapConfirmed = { e, node ->
-                    if (node == null) {
+                    // Only allow placing/teleporting the car if we are in Translate mode!
+                    // If node == null, they tapped the floor.
+                    if (node == null && uiState.interactionMode == InteractionMode.TRANSLATE) {
                         lastTapEvent = e
+                    }
+                },
+                onScale = { detector, e, node ->
+                    if (uiState.interactionMode == InteractionMode.ZOOM) {
+                        currentModelNode?.let { modelNode ->
+                            // Dampen sensitivity: native pinch is very fast. 
+                            // Reduce the distance from 1.0f by multiplying by 0.3f
+                            val scaleDelta = detector.scaleFactor - 1f
+                            val adjustedScaleFactor = 1f + (scaleDelta * 0.3f)
+                            
+                            // Calculate new relative zoom level clamped between 0.5x and 5.0x of the DEFAULT size
+                            val newZoomLevel = (currentZoomLevel * adjustedScaleFactor).coerceIn(0.5f, 5.0f)
+                            val effectiveMultiplier = newZoomLevel / currentZoomLevel
+                            currentZoomLevel = newZoomLevel
+                            
+                            val currentScale = modelNode.scale
+                            modelNode.scale = io.github.sceneview.math.Scale(
+                                currentScale.x * effectiveMultiplier,
+                                currentScale.y * effectiveMultiplier,
+                                currentScale.z * effectiveMultiplier
+                            )
+                        }
                     }
                 }
             ),
@@ -142,95 +244,218 @@ fun ArSceneScreen(
             }
         )
 
-        // Top Bar
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 48.dp),
-            color = Color.Black.copy(alpha = 0.6f),
-            shape = MaterialTheme.shapes.extraLarge
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(text = "AR Showroom", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                Text(text = "Tap floor to place car", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-            }
-        }
-
-        // Rev Button
-        RevButton(
-            onRevvingChanged = { viewModel.handleIntent(CarShowroomIntent.SetRevving(it)) },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 100.dp, end = 24.dp)
-        )
-
-        // Bottom Controls
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
-            color = Color.Black.copy(alpha = 0.4f),
-            shape = MaterialTheme.shapes.large
-        ) {
-            Row(
+        if (!isCapturing) {
+            // Top Bar
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                    .align(Alignment.TopCenter)
+                    .padding(top = 48.dp)
+                    .oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape)
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
             ) {
-                IconButton(onClick = { showCarSheet = true }) {
-                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Cars", tint = Color.White)
-                }
-                IconButton(onClick = { showColorSheet = true }) {
-                    Icon(Icons.Default.Build, contentDescription = "Paint", tint = Color.White)
-                }
-                IconButton(onClick = { showWheelSheet = true }) {
-                    Icon(Icons.Default.Settings, contentDescription = "Wheels", tint = Color.White)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "AR Showroom", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                    Text(text = "Tap floor to place car", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
                 }
             }
-        }
 
-        // Sheets
-        if (showCarSheet) {
-            ModalBottomSheet(onDismissRequest = { showCarSheet = false }) {
-                CarSelectorSheet(
-                    cars = uiState.cars,
-                    selectedCar = uiState.selectedCar,
-                    onCarSelected = { car ->
-                        viewModel.handleIntent(CarShowroomIntent.SelectCar(car))
-                        showCarSheet = false
+            // Back Button
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 48.dp, start = 16.dp)
+                    .oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back to Showroom",
+                    tint = Color.White
+                )
+            }
+
+            // Mute Button
+            IconButton(
+                onClick = { viewModel.handleIntent(CarShowroomIntent.ToggleMute) },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 48.dp, end = 16.dp)
+                    .oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (uiState.isMuted) androidx.compose.material.icons.Icons.Default.VolumeOff else androidx.compose.material.icons.Icons.Default.VolumeUp,
+                    contentDescription = "Toggle Mute",
+                    tint = Color.White
+                )
+            }
+
+            // Interaction Mode Controls (Left Toolbar)
+            val isPlaced = currentAnchorNode != null
+            val accentColor = Color(0xFFFF3B30) // Bright Red
+            
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Lock / Translate Button
+                IconButton(
+                    onClick = { 
+                        if (isPlaced) {
+                            val newMode = if (uiState.interactionMode == InteractionMode.TRANSLATE) InteractionMode.LOCKED else InteractionMode.TRANSLATE
+                            viewModel.handleIntent(CarShowroomIntent.SetInteractionMode(newMode))
+                        }
+                    },
+                    modifier = Modifier.oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape),
+                    enabled = isPlaced
+                ) {
+                    Icon(
+                        imageVector = if (uiState.interactionMode == InteractionMode.TRANSLATE) androidx.compose.material.icons.Icons.Default.LockOpen else androidx.compose.material.icons.Icons.Default.Lock,
+                        contentDescription = "Toggle Translation",
+                        tint = if (!isPlaced) Color.White.copy(alpha = 0.3f) 
+                            else if (uiState.interactionMode == InteractionMode.TRANSLATE) accentColor 
+                            else Color.White
+                    )
+                }
+
+                // Zoom Button
+                IconButton(
+                    onClick = { 
+                        if (isPlaced) {
+                            val newMode = if (uiState.interactionMode == InteractionMode.ZOOM) InteractionMode.LOCKED else InteractionMode.ZOOM
+                            viewModel.handleIntent(CarShowroomIntent.SetInteractionMode(newMode))
+                        }
+                    },
+                    modifier = Modifier.oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape),
+                    enabled = isPlaced
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.ZoomIn,
+                        contentDescription = "Toggle Zoom",
+                        tint = if (!isPlaced) Color.White.copy(alpha = 0.3f) 
+                            else if (uiState.interactionMode == InteractionMode.ZOOM) accentColor 
+                            else Color.White
+                    )
+                }
+
+                // Rotate Button
+                IconButton(
+                    onClick = { 
+                        if (isPlaced) {
+                            val newMode = if (uiState.interactionMode == InteractionMode.ROTATE) InteractionMode.LOCKED else InteractionMode.ROTATE
+                            viewModel.handleIntent(CarShowroomIntent.SetInteractionMode(newMode))
+                        }
+                    },
+                    modifier = Modifier.oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape),
+                    enabled = isPlaced
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Refresh,
+                        contentDescription = "Toggle Rotate",
+                        tint = if (!isPlaced) Color.White.copy(alpha = 0.3f) 
+                            else if (uiState.interactionMode == InteractionMode.ROTATE) accentColor 
+                            else Color.White
+                    )
+                }
+            }
+                
+            // Camera (Snapshot) Button
+            IconButton(
+                onClick = { isCapturing = true },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 16.dp)
+                    .size(56.dp)
+                    .oneUiEffect(shape = androidx.compose.foundation.shape.CircleShape),
+                enabled = isPlaced
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = "Take Snapshot",
+                    tint = if (!isPlaced) Color.White.copy(alpha = 0.3f) else Color.White
+                )
+            }
+
+            // Bottom Controls
+            val currentSelection = when {
+                showCarSheet -> BottomNavOption.CARS
+                showColorSheet -> BottomNavOption.PAINT
+                showWheelSheet -> BottomNavOption.WHEELS
+                else -> null
+            }
+
+            Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                AnimatedBottomNavigationBar(
+                    currentSelection = currentSelection,
+                    onOptionSelected = { option ->
+                        if (currentSelection == option) {
+                            showCarSheet = false
+                            showColorSheet = false
+                            showWheelSheet = false
+                        } else {
+                            showCarSheet = option == BottomNavOption.CARS
+                            showColorSheet = option == BottomNavOption.PAINT
+                            showWheelSheet = option == BottomNavOption.WHEELS
+                        }
                     }
                 )
             }
-        }
 
-        if (showColorSheet) {
-            ModalBottomSheet(onDismissRequest = { showColorSheet = false }) {
-                ColorPickerSheet(
-                    colors = uiState.colors,
-                    selectedColor = uiState.selectedColor,
-                    onColorSelected = { color ->
-                        viewModel.handleIntent(CarShowroomIntent.SelectColor(color))
-                        showColorSheet = false
-                    }
-                )
+            // Sheets
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showCarSheet,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp),
+                enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut()
+            ) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CarSelectorSheet(
+                        cars = uiState.cars,
+                        selectedCar = uiState.selectedCar,
+                        onCarSelected = { car ->
+                            viewModel.handleIntent(CarShowroomIntent.SelectCar(car))
+                            showCarSheet = false
+                        }
+                    )
+                }
             }
-        }
 
-        if (showWheelSheet) {
-            ModalBottomSheet(onDismissRequest = { showWheelSheet = false }) {
-                WheelPickerSheet(
-                    wheels = uiState.wheels,
-                    selectedWheel = uiState.selectedWheel,
-                    onWheelSelected = { wheel ->
-                        viewModel.handleIntent(CarShowroomIntent.SelectWheel(wheel))
-                        showWheelSheet = false
-                    }
-                )
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showColorSheet,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp),
+                enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut()
+            ) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    ColorPickerSheet(
+                        colors = uiState.colors,
+                        selectedColor = uiState.selectedColor,
+                        onColorSelected = { color ->
+                            viewModel.handleIntent(CarShowroomIntent.SelectColor(color))
+                            showColorSheet = false
+                        }
+                    )
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showWheelSheet,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp),
+                enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut()
+            ) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    WheelPickerSheet(
+                        wheels = uiState.wheels,
+                        selectedWheel = uiState.selectedWheel,
+                        onWheelSelected = { wheel ->
+                            viewModel.handleIntent(CarShowroomIntent.SelectWheel(wheel))
+                            showWheelSheet = false
+                        }
+                    )
+                }
             }
         }
     }

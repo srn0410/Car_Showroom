@@ -1,5 +1,8 @@
 package com.example.carshowroom.ui.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,8 +13,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.carshowroom.data.models.CarColor
 
@@ -25,26 +31,35 @@ fun ColorPickerSheet(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)
+            .oneUiEffect()
+            .padding(16.dp)
     ) {
         Text(
-            text = "Select Color",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(bottom = 8.dp)
+            text = "Select Paint",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 12.dp)
         )
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(vertical = 8.dp)
+            contentPadding = PaddingValues(vertical = 4.dp)
         ) {
             items(colors) { carColor ->
+                val isSelected = carColor == selectedColor
+                val size by animateDpAsState(
+                    targetValue = if (isSelected) 56.dp else 48.dp,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    label = "colorSize"
+                )
+                
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(size)
                         .clip(CircleShape)
                         .background(carColor.color)
                         .border(
-                            width = 3.dp,
-                            color = if (carColor == selectedColor) MaterialTheme.colorScheme.primary 
-                                    else androidx.compose.ui.graphics.Color.Transparent,
+                            width = if (isSelected) 4.dp else 2.dp,
+                            color = if (isSelected) Color(0xFFFF3B30) else Color.White.copy(alpha = 0.2f),
                             shape = CircleShape
                         )
                         .clickable { onColorSelected(carColor) }

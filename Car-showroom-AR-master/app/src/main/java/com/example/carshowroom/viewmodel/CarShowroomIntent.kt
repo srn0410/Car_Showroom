@@ -9,5 +9,9 @@ sealed class CarShowroomIntent {
     data class SelectColor(val color: CarColor) : CarShowroomIntent()
     data class SelectWheel(val wheel: WheelStyle) : CarShowroomIntent()
     data class SetRevving(val isRevving: Boolean) : CarShowroomIntent()
+    object ToggleMute : CarShowroomIntent()
+    data class SetInteractionMode(val mode: InteractionMode) : CarShowroomIntent()
+    object PauseAudio : CarShowroomIntent()
+    object ResumeAudio : CarShowroomIntent()
     object Initialize : CarShowroomIntent()
 }
